@@ -1,3 +1,5 @@
+import 'package:shared_preferences/shared_preferences.dart';
+
 /// ゲーム全体の数値と進行を管理するクラス。
 /// 画面から独立しているので、どのタブを開いていても戦闘は進む。
 class GameState {
@@ -11,12 +13,33 @@ class GameState {
   /// 前回の攻撃から経過した秒数の蓄積
   double _attackTimer = 0;
 
-  /// 攻撃力（初期5、強化ごとに+2）
-  double get attack => 5 + attackLevel * 2;
+  /// バフの残り秒数
+  double attackBuffRemaining = 0;
+  double coinBuffRemaining = 0;
+
+  /// バフの効果時間（秒）
+  static const double buffDuration = 180; // 3分
+
+  /// バフの価格
+  static const double attackBuffCost = 100;
+  static const double coinBuffCost = 100;
+
+  /// オフライン進行の上限（秒）＝ 8時間
+  static const double maxOfflineSeconds = 8 * 60 * 60;
+
+  /// バフが有効か
+  bool get isAttackBuffActive => attackBuffRemaining > 0;
+  bool get isCoinBuffActive => coinBuffRemaining > 0;
+
+  /// バフを含まない素の攻撃力（育成画面で表示する値）
+  double get baseAttack => 5.0 + attackLevel * 2;
+
+  /// 実際に戦闘で使う攻撃力（バフ中は2倍）
+  double get attack => isAttackBuffActive ? baseAttack * 2 : baseAttack;
 
   /// 攻撃速度（初期1.0回/秒、強化ごとに+0.1、上限3.0）
   double get attackSpeed {
-    final speed = 1.0 + speedLevel * 0.1;
+    final double speed = 1.0 + speedLevel * 0.1;
     return speed > 3.0 ? 3.0 : speed;
   }
 
@@ -35,11 +58,24 @@ class GameState {
   /// 現在の階層の敵の最大HP
   double get enemyMaxHp => 10 * _pow(1.15, floor - 1);
 
-  /// 現在の階層で倒したときに得られるコイン
-  double get dropCoin => 5 * _pow(1.12, floor - 1);
+  /// バフを含まない素のドロップコイン
+  double get baseDropCoin => 5 * _pow(1.12, floor - 1);
+
+  /// 実際に得られるコイン（バフ中は2倍）
+  double get dropCoin => isCoinBuffActive ? baseDropCoin * 2 : baseDropCoin;
 
   /// 時間を進める。deltaSeconds 秒ぶんの戦闘を処理する。
   void tick(double deltaSeconds) {
+    // バフの残り時間を減らす
+    if (attackBuffRemaining > 0) {
+      attackBuffRemaining -= deltaSeconds;
+      if (attackBuffRemaining < 0) attackBuffRemaining = 0;
+    }
+    if (coinBuffRemaining > 0) {
+      coinBuffRemaining -= deltaSeconds;
+      if (coinBuffRemaining < 0) coinBuffRemaining = 0;
+    }
+
     _attackTimer += deltaSeconds;
     // 攻撃間隔ぶん溜まっている限り攻撃する
     while (_attackTimer >= attackInterval) {
@@ -73,6 +109,70 @@ class GameState {
     coins -= speedUpgradeCost;
     speedLevel++;
     return true;
+  }
+
+  /// 攻撃力2倍薬を買う。成功したら true。
+  bool buyAttackBuff() {
+    if (coins < attackBuffCost) return false;
+    coins -= attackBuffCost;
+    attackBuffRemaining = buffDuration;
+    return true;
+  }
+
+  /// コイン2倍薬を買う。成功したら true。
+  bool buyCoinBuff() {
+    if (coins < coinBuffCost) return false;
+    coins -= coinBuffCost;
+    coinBuffRemaining = buffDuration;
+    return true;
+  }
+
+  // ---------- セーブ / ロード ----------
+
+  /// 現在の状態を端末に保存する
+  Future<void> save() async {
+    final prefs = await SharedPreferences.getInstance();
+    await prefs.setInt('floor', floor);
+    await prefs.setDouble('coins', coins);
+    await prefs.setDouble('enemyHp', enemyHp);
+    await prefs.setInt('attackLevel', attackLevel);
+    await prefs.setInt('speedLevel', speedLevel);
+    await prefs.setDouble('attackBuffRemaining', attackBuffRemaining);
+    await prefs.setDouble('coinBuffRemaining', coinBuffRemaining);
+    // 保存した時刻をミリ秒で記録（オフライン計算に使う）
+    await prefs.setInt('savedAt', DateTime.now().millisecondsSinceEpoch);
+  }
+
+  /// 保存された状態を読み込み、離れていた時間ぶん進める。
+  /// 戻り値は「オフラインで経過した秒数」（初回起動なら 0）。
+  Future<double> load() async {
+    final prefs = await SharedPreferences.getInstance();
+
+    final savedAt = prefs.getInt('savedAt');
+    if (savedAt == null) {
+      // セーブデータなし（初回起動）
+      return 0;
+    }
+
+    floor = prefs.getInt('floor') ?? 1;
+    coins = prefs.getDouble('coins') ?? 0;
+    enemyHp = prefs.getDouble('enemyHp') ?? 10;
+    attackLevel = prefs.getInt('attackLevel') ?? 0;
+    speedLevel = prefs.getInt('speedLevel') ?? 0;
+    attackBuffRemaining = prefs.getDouble('attackBuffRemaining') ?? 0;
+    coinBuffRemaining = prefs.getDouble('coinBuffRemaining') ?? 0;
+
+    // 離れていた秒数を計算
+    final nowMs = DateTime.now().millisecondsSinceEpoch;
+    double elapsed = (nowMs - savedAt) / 1000.0;
+
+    if (elapsed < 0) elapsed = 0; // 端末の時刻が巻き戻された場合の保険
+    if (elapsed > maxOfflineSeconds) elapsed = maxOfflineSeconds;
+
+    if (elapsed > 0) {
+      tick(elapsed);
+    }
+    return elapsed;
   }
 
   /// base の exponent 乗

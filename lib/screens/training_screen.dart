@@ -29,7 +29,7 @@ class _TrainingScreenState extends State<TrainingScreen> {
             const SizedBox(height: 32),
             _UpgradeCard(
               title: '攻撃力',
-              currentValue: state.attack.toStringAsFixed(1),
+              currentValue: state.baseAttack.toStringAsFixed(1),
               cost: state.attackUpgradeCost,
               canAfford: state.coins >= state.attackUpgradeCost,
               isMaxed: false,
