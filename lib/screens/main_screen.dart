@@ -1,3 +1,4 @@
+import 'dart:async';
 import 'package:flutter/material.dart';
 import '../game_state.dart';
 import 'home_screen.dart';
@@ -15,6 +16,29 @@ class MainScreen extends StatefulWidget {
 class _MainScreenState extends State<MainScreen> {
   final GameState _gameState = GameState();
   int _currentIndex = 0;
+  Timer? _timer;
+
+  /// ゲームループの間隔（秒）
+  static const double _tickInterval = 0.1;
+
+  @override
+  void initState() {
+    super.initState();
+    _timer = Timer.periodic(
+      const Duration(milliseconds: 100),
+      (_) {
+        setState(() {
+          _gameState.tick(_tickInterval);
+        });
+      },
+    );
+  }
+
+  @override
+  void dispose() {
+    _timer?.cancel();
+    super.dispose();
+  }
 
   @override
   Widget build(BuildContext context) {

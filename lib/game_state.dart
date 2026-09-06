@@ -1,5 +1,5 @@
-/// ゲーム全体の数値を保持するクラス。
-/// 画面から独立しているので、タブを切り替えても値は消えない。
+/// ゲーム全体の数値と進行を管理するクラス。
+/// 画面から独立しているので、どのタブを開いていても戦闘は進む。
 class GameState {
   int floor = 1;              // 現在の階層
   double coins = 0;           // 所持コイン
@@ -7,6 +7,9 @@ class GameState {
 
   int attackLevel = 0;        // 攻撃力の強化回数
   int speedLevel = 0;         // 攻撃速度の強化回数
+
+  /// 前回の攻撃から経過した秒数の蓄積
+  double _attackTimer = 0;
 
   /// 攻撃力（初期5、強化ごとに+2）
   double get attack => 5 + attackLevel * 2;
@@ -16,6 +19,9 @@ class GameState {
     final speed = 1.0 + speedLevel * 0.1;
     return speed > 3.0 ? 3.0 : speed;
   }
+
+  /// 攻撃1回にかかる秒数
+  double get attackInterval => 1.0 / attackSpeed;
 
   /// 攻撃力強化のコスト
   double get attackUpgradeCost => 10 * _pow(1.15, attackLevel);
@@ -32,16 +38,24 @@ class GameState {
   /// 現在の階層で倒したときに得られるコイン
   double get dropCoin => 5 * _pow(1.12, floor - 1);
 
-  /// 1回攻撃する。敵を倒したら true を返す。
-  bool attackOnce() {
+  /// 時間を進める。deltaSeconds 秒ぶんの戦闘を処理する。
+  void tick(double deltaSeconds) {
+    _attackTimer += deltaSeconds;
+    // 攻撃間隔ぶん溜まっている限り攻撃する
+    while (_attackTimer >= attackInterval) {
+      _attackTimer -= attackInterval;
+      _attackOnce();
+    }
+  }
+
+  /// 1回攻撃する
+  void _attackOnce() {
     enemyHp -= attack;
     if (enemyHp <= 0) {
       coins += dropCoin;
       floor++;
       enemyHp = enemyMaxHp;
-      return true;
     }
-    return false;
   }
 
   /// 攻撃力を強化する。成功したら true。
