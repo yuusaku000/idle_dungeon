@@ -10,6 +10,15 @@ class GameState {
   int attackLevel = 0;        // 攻撃力の強化回数
   int speedLevel = 0;         // 攻撃速度の強化回数
 
+  /// リセットで得た永久バフの合計（% 単位。50 なら +50%）
+  double prestigeBonus = 0;
+
+  /// 到達した最高階層
+  int maxFloor = 1;
+
+  /// リセット回数
+  int prestigeCount = 0;
+
   /// 前回の攻撃から経過した秒数の蓄積
   double _attackTimer = 0;
 
@@ -27,12 +36,24 @@ class GameState {
   /// オフライン進行の上限（秒）＝ 8時間
   static const double maxOfflineSeconds = 8 * 60 * 60;
 
+  /// リセットできる最低階層
+  static const int minPrestigeFloor = 10;
+
   /// バフが有効か
   bool get isAttackBuffActive => attackBuffRemaining > 0;
   bool get isCoinBuffActive => coinBuffRemaining > 0;
 
-  /// バフを含まない素の攻撃力（育成画面で表示する値）
-  double get baseAttack => 5.0 + attackLevel * 2;
+  /// 今リセットしたら得られるボーナス（%）
+  double get pendingPrestigeBonus => floor.toDouble();
+
+  /// リセット可能か
+  bool get canPrestige => floor >= minPrestigeFloor;
+
+  /// バフを含まない素の攻撃力（永久バフは含む）
+  double get baseAttack {
+    final double raw = 5.0 + attackLevel * 2;
+    return raw * (1 + prestigeBonus / 100);
+  }
 
   /// 実際に戦闘で使う攻撃力（バフ中は2倍）
   double get attack => isAttackBuffActive ? baseAttack * 2 : baseAttack;
@@ -90,6 +111,7 @@ class GameState {
     if (enemyHp <= 0) {
       coins += dropCoin;
       floor++;
+      if (floor > maxFloor) maxFloor = floor;
       enemyHp = enemyMaxHp;
     }
   }
@@ -127,6 +149,26 @@ class GameState {
     return true;
   }
 
+  /// リセットして永久バフを獲得する。成功したら true。
+  bool prestige() {
+    if (!canPrestige) return false;
+
+    prestigeBonus += pendingPrestigeBonus;
+    prestigeCount++;
+
+    // 失うもの
+    floor = 1;
+    coins = 0;
+    attackLevel = 0;
+    speedLevel = 0;
+    attackBuffRemaining = 0;
+    coinBuffRemaining = 0;
+    _attackTimer = 0;
+    enemyHp = enemyMaxHp;
+
+    return true;
+  }
+
   // ---------- セーブ / ロード ----------
 
   /// 現在の状態を端末に保存する
@@ -139,6 +181,9 @@ class GameState {
     await prefs.setInt('speedLevel', speedLevel);
     await prefs.setDouble('attackBuffRemaining', attackBuffRemaining);
     await prefs.setDouble('coinBuffRemaining', coinBuffRemaining);
+    await prefs.setDouble('prestigeBonus', prestigeBonus);
+    await prefs.setInt('maxFloor', maxFloor);
+    await prefs.setInt('prestigeCount', prestigeCount);
     // 保存した時刻をミリ秒で記録（オフライン計算に使う）
     await prefs.setInt('savedAt', DateTime.now().millisecondsSinceEpoch);
   }
@@ -161,6 +206,9 @@ class GameState {
     speedLevel = prefs.getInt('speedLevel') ?? 0;
     attackBuffRemaining = prefs.getDouble('attackBuffRemaining') ?? 0;
     coinBuffRemaining = prefs.getDouble('coinBuffRemaining') ?? 0;
+    prestigeBonus = prefs.getDouble('prestigeBonus') ?? 0;
+    maxFloor = prefs.getInt('maxFloor') ?? 1;
+    prestigeCount = prefs.getInt('prestigeCount') ?? 0;
 
     // 離れていた秒数を計算
     final nowMs = DateTime.now().millisecondsSinceEpoch;
